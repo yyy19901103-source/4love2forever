@@ -1,0 +1,13 @@
+flowchart TD
+    A --> B
+    A --> C
+    B --> D
+    C --> D
+
+gantt
+    title Sample
+    section Dev
+    要件定義 :A, 2d
+    設計 :B, after A, 3d
+    実装 :C, after A, 5d
+    テスト :D, 2d
