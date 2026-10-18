@@ -102,3 +102,14 @@ def test_similarity_bounds():
     a = pool_item("a", "09-3", "HAVING句")
     assert qbank.similarity(a, a) == 1.0
     assert qbank.similarity(a, pool_item("b", "09-3", "公開鍵暗号")) == 0.0
+
+
+def test_seed_bank_covers_every_middle_category_and_answers_are_balanced():
+    from collections import Counter
+    qs, errors = qbank.load_questions(qbank.question_files(), TAX)
+    assert errors == []
+    per_mid = Counter(TAX[q["code"]]["中分類番号"] for q in qs)
+    assert set(per_mid) == set(aplib.middle_categories(TAX))
+    assert min(per_mid.values()) >= 3  # 関連問題を出せるよう、各中分類に3問以上
+    answers = Counter(q["answer"] for q in qs)
+    assert max(answers.values()) / len(qs) <= 0.35  # 1つの記号に偏ると当て推量で正解できてしまう
