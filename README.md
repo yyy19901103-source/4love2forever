@@ -66,3 +66,26 @@ python mermaid_scheduler.py sample.mmd --json
 - リソース（担当者、工数）最適化
 - Web UI（Streamlit / FastAPI + フロント）
 - Mermaid live preview 連携
+
+---
+
+# 応用情報技術者試験（AP）学習ログ
+
+方針・日程・ルールは `CLAUDE.md` を参照。
+
+| ファイル | 役割 |
+| --- | --- |
+| `data/taxonomy.csv` | 科目A体系表（23中分類・96小分類、コード例 `09-3`） |
+| `data/plan_A.csv` | 科目Aの日別計画問題数（10/19〜11/8、合計1080問） |
+| `scripts/add_log.py` | 1問ずつ対話形式で `data/log_A.csv` に追記（入力時に検証） |
+| `scripts/analyze_A.py` | 科目A日次レポート（中分類別Wilson 95%区間・上位3中分類・原因別・計画差） |
+| `scripts/analyze_B.py` | 科目B分野別レポートと選択分野の入れ替え判定（6割未満） |
+| `docs/error_log.md` | 誤りの記録 |
+
+```bash
+python scripts/add_log.py                                   # 1問記録（q で中断）
+python scripts/analyze_A.py                                 # 最新日付の日次レポート
+python scripts/analyze_A.py --date 2026-10-19 --out reports/A_2026-10-19.md
+python scripts/analyze_B.py --since 2026-11-10 --until 2026-11-16
+python -m pytest -q                                         # テスト
+```
