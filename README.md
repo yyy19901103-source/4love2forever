@@ -85,6 +85,10 @@ python mermaid_scheduler.py sample.mmd --json
 | `data/questions/*.jsonl` / `scripts/qbank.py` | 問題バンクの正本と SQLite の作成・検証・収録状況 |
 | `scripts/quiz.py` | 演習：誤答・不明 → 解説と解析 → 関連問題を2〜3問 → 次の本問 |
 | `docs/sources.md` | 問題の出典と利用条件 |
+| `data/syllabus_A.json` / `data/scope_B.json` / `docs/ap_knowledge_tree.html` | シラバス Ver.7.2・試験要綱 Ver.5.6 から抽出した公式の知識ツリー（ユーザー提示） |
+| `scripts/syllabus.py` | シラバスとの照合（`check`）・学習ノート生成（`book`）・ツリー表示（`tree`） |
+| `docs/ap_syllabus_book.md` | シラバスの並びで、425項目すべての用語例と要点をまとめた学習ノート |
+| `data/knowledge_items.csv` / `data/syllabus_points.csv` | 要点の正本（学習項目433件＋シラバス項目に直接付けた198件） |
 
 ```bash
 python scripts/quiz.py --mid 09                             # 中分類09を演習（記録は自動）
