@@ -2,6 +2,7 @@
 
 使い方: python scripts/tree_A.py [--detail] [--out docs/taxonomy_tree.md]
 --detail を付けると、小分類ごとの学習項目（data/knowledge_items.csv）も表示する。
+--points を付けると、学習項目ごとの要点を Markdown で出力する（docs/knowledge_points.md 用）。
 """
 from __future__ import annotations
 
@@ -22,6 +23,31 @@ def load_knowledge(path: Path = KNOWLEDGE_PATH) -> dict[str, list[str]]:
         for row in csv.DictReader(f):
             items.setdefault(row["コード"], []).append(row["項目"])
     return items
+
+
+def load_points(path: Path = KNOWLEDGE_PATH) -> dict[str, list[tuple[str, str]]]:
+    """コード → [(項目, 要点), ...]。"""
+    points: dict[str, list[tuple[str, str]]] = {}
+    with open(path, encoding=aplib.ENCODING, newline="") as f:
+        for row in csv.DictReader(f):
+            points.setdefault(row["コード"], []).append((row["項目"], row.get("要点") or ""))
+    return points
+
+
+def build_points(taxonomy, points) -> str:
+    lines = ["# AP 科目A 学習項目と要点", "",
+             "`python scripts/tree_A.py --points --out docs/knowledge_points.md` で data/knowledge_items.csv から生成。",
+             "根拠区分＝推定（Claude の知識による整理。IPA シラバス Ver.7.2 との照合は未実施）。"
+             "数値例はコードで検算済み。法令は改正に注意（取適法は2026-01-01施行を二次情報で確認）。", ""]
+    current_mid = None
+    for code, row in taxonomy.items():
+        if row["中分類番号"] != current_mid:
+            current_mid = row["中分類番号"]
+            lines += [f"## {current_mid} {row['中分類']}（{row['分野']}）", ""]
+        lines += [f"### {code} {row['小分類']}", ""]
+        lines += [f"- **{item}**：{point or '（未記入）'}" for item, point in points.get(code, [])]
+        lines.append("")
+    return "\n".join(lines)
 
 
 def build_tree(taxonomy, knowledge: dict[str, list[str]] | None = None) -> str:
@@ -60,8 +86,16 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--taxonomy", type=Path, default=aplib.TAXONOMY_PATH)
     p.add_argument("--detail", action="store_true", help="小分類ごとの学習項目も表示する")
+    p.add_argument("--points", action="store_true", help="学習項目ごとの要点を Markdown で出力する")
     p.add_argument("--out", type=Path, help="Markdown の出力先（省略時は標準出力）")
     args = p.parse_args(argv)
+    if args.points:
+        text = build_points(aplib.load_taxonomy(args.taxonomy), load_points())
+        if args.out:
+            args.out.write_text(text, encoding="utf-8")
+        else:
+            sys.stdout.write(text)
+        return 0
     tree = build_tree(aplib.load_taxonomy(args.taxonomy), load_knowledge() if args.detail else None)
     if args.out:
         note = ("学習項目は data/knowledge_items.csv。根拠区分＝推定（Claude の知識による整理。"

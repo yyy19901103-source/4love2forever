@@ -47,3 +47,19 @@ def test_detail_tree_shows_items_inline():
     assert text.splitlines()[0].endswith("学習項目 433")
     assert "09-3 データ操作：関係代数（選択・射影・結合・和・差・直積）、" in text
     assert len(text.splitlines()) == 1 + 3 + 9 + 23 + 96
+
+
+def test_every_item_has_a_point():
+    points = tree_A.load_points()
+    assert sum(len(v) for v in points.values()) == 433
+    for code, pairs in points.items():
+        for item, point in pairs:
+            assert len(point) >= 15, (code, item)
+    assert ("取適法（旧下請法）" in [i for i, _ in points["23-3"]])
+
+
+def test_points_markdown_structure():
+    md = tree_A.build_points(TAX, tree_A.load_points())
+    assert md.count("\n## ") == 23 and md.count("\n### ") == 96
+    assert "（未記入）" not in md
+    assert "- **待ち行列（M/M/1）**：利用率" in md
