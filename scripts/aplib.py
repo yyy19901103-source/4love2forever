@@ -15,10 +15,15 @@ PLAN_A_PATH = DATA_DIR / "plan_A.csv"
 # Excel で開いても文字化けしないよう BOM 付き UTF-8 で書き、読むときは BOM の有無を問わない
 ENCODING = "utf-8-sig"
 
-LOG_A_COLUMNS = [
+LOG_A_REQUIRED = [
     "日付", "出典", "問番号", "コード", "確信度", "正誤", "原因",
     "正解の根拠", "誤選択肢が違う理由", "解答秒", "分析秒",
 ]
+# 問題ID（問題バンクの id、手入力なら空）と種別（本問／関連）は末尾に追加した任意列。
+# 列のない古いログは 問題ID=空・種別=本問 として読む。
+LOG_A_OPTIONAL = {"問題ID": "", "種別": "本問"}
+LOG_A_COLUMNS = LOG_A_REQUIRED + list(LOG_A_OPTIONAL)
+KINDS = ("本問", "関連")
 LOG_B_COLUMNS = [
     "日付", "出典", "問番号", "分野", "得点率", "所要分",
     "失点した設問", "原因", "書けなかった根拠の位置",
@@ -60,9 +65,11 @@ def validate_row_a(row: dict[str, str], taxonomy: dict[str, dict[str, str]]) -> 
     from datetime import date
 
     errors = []
-    missing = [c for c in LOG_A_COLUMNS if c not in row]
+    missing = [c for c in LOG_A_REQUIRED if c not in row]
     if missing:
         return [f"列が不足しています: {missing}"]
+    if (row.get("種別") or "本問") not in KINDS:
+        errors.append(f"種別は 本問/関連 のいずれかです: {row['種別']!r}")
     try:
         date.fromisoformat(row["日付"])
     except ValueError:
@@ -96,6 +103,8 @@ def read_log_a(path: Path, taxonomy: dict[str, dict[str, str]]) -> tuple[list[di
     rows, warnings = [], []
     with open(path, encoding=ENCODING, newline="") as f:
         for lineno, row in enumerate(csv.DictReader(f), start=2):
+            for col, default in LOG_A_OPTIONAL.items():
+                row[col] = row.get(col) or default
             errs = validate_row_a(row, taxonomy)
             if errs:
                 warnings.append(f"{path.name} {lineno}行目を除外: {'; '.join(errs)}")

@@ -3,6 +3,8 @@
 使い方: python scripts/analyze_A.py [--date YYYY-MM-DD] [--out report.md]
 集計は報告日までの累計（判定用）と報告日当日の2本立て。判定は中分類単位で行い、
 小分類はタグとしてだけ表示する（小分類あたり数問では正答率の誤差が大きすぎるため）。
+正答率・判定・誤答上位は本問だけで計算する。関連問題（誤答直後に解く類題）は解説を読んだ直後で
+正答率が高めに出るため判定から外し、問題数・時間・原因の件数には含める。
 """
 from __future__ import annotations
 
@@ -96,10 +98,14 @@ def tag_text(tags: Counter, taxonomy) -> str:
     return " ".join(f"{c}{taxonomy[c]['小分類']}×{n}" for c, n in sorted(tags.items(), key=lambda t: (-t[1], t[0])))
 
 
+def is_main(row) -> bool:
+    return (row.get("種別") or "本問") == "本問"
+
+
 def build_report(rows, taxonomy, plan: dict[str, int], report_date: str, warnings=()) -> str:
     cum = [r for r in rows if r["日付"] <= report_date]
     day = [r for r in cum if r["日付"] == report_date]
-    stats = middle_stats(cum, taxonomy)
+    stats = middle_stats([r for r in cum if is_main(r)], taxonomy)
     out = []
     w = out.append
 
@@ -110,17 +116,20 @@ def build_report(rows, taxonomy, plan: dict[str, int], report_date: str, warning
     w("")
 
     w("## 1. 概要（実測）")
-    w("| 範囲 | 解答数 | 実質誤答数 | 実質正答率 |")
-    w("| --- | ---: | ---: | ---: |")
+    w("| 範囲 | 解答数（本問） | 実質誤答数 | 実質正答率 | 関連問題数 | 関連の実質正答率 |")
+    w("| --- | ---: | ---: | ---: | ---: | ---: |")
     for label, rs in (("当日", day), ("累計", cum)):
-        n, wr, rate = summary_line(rs)
-        w(f"| {label} | {n} | {wr} | {pct(rate)} |")
+        n, wr, rate = summary_line([r for r in rs if is_main(r)])
+        rn, _, rrate = summary_line([r for r in rs if not is_main(r)])
+        w(f"| {label} | {n} | {wr} | {pct(rate)} | {rn} | {pct(rrate)} |")
     w("")
 
     w("## 2. 計画との差")
     plan_cum = sum(q for d, q in plan.items() if d <= report_date)
     plan_day = plan.get(report_date, 0)
     plan_total = sum(plan.values())
+    w("問題数は本問＋関連の合計で数える（関連問題も時間を使うため）。")
+    w("")
     w("| 項目 | 計画（ユーザー提示） | 実測 | 差（実測−計画） |")
     w("| --- | ---: | ---: | ---: |")
     w(f"| 当日の問題数 | {plan_day} | {len(day)} | {len(day) - plan_day:+d} |")
@@ -152,7 +161,7 @@ def build_report(rows, taxonomy, plan: dict[str, int], report_date: str, warning
         w("- 実測がないため補正できません。初日の分析秒で補正してください。")
     w("")
 
-    w("## 3. 中分類別（累計、判定は中分類単位）")
+    w("## 3. 中分類別（累計・本問のみ、判定は中分類単位）")
     w(f"判定：Wilson 95%信頼区間の上限 < {PASS_RATE:.0%} → 弱点、下限 ≥ {PASS_RATE:.0%} → 合格圏、それ以外 → 保留（データ不足）。")
     w("")
     w("| 中分類 | 名称 | 解答数 | 実質誤答数 | 実質正答率 | 95%信頼区間 | 判定 | 誤答の小分類タグ |")

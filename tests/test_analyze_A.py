@@ -75,8 +75,8 @@ def test_report_sections_plan_diff_and_cumulative_scope():
     plan = {"2026-10-19": 40, "2026-10-20": 40, "2026-10-21": 40}
     rep = analyze_A.build_report(rows, TAX, plan, "2026-10-20")
 
-    assert "| 当日 | 1 | 1 | 0.0% |" in rep
-    assert "| 累計 | 3 | 2 | 33.3% |" in rep
+    assert "| 当日 | 1 | 1 | 0.0% | 0 | — |" in rep
+    assert "| 累計 | 3 | 2 | 33.3% | 0 | — |" in rep
     assert "| 当日の問題数 | 40 | 1 | -39 |" in rep
     assert "| 累計問題数 | 80 | 3 | -77 |" in rep
     # 当日計画 40問 × 3.375分 = 135分 = 2.25時間、実測 (120+120)/3600 = 0.07時間
@@ -101,7 +101,7 @@ def test_main_excludes_invalid_rows_and_writes_file(tmp_path, capsys):
     assert analyze_A.main(["--log", str(log), "--out", str(out)]) == 0
     rep = out.read_text(encoding="utf-8")
     assert "# 科目A 日次レポート 2026-10-19" in rep  # 既定の報告日はログの最新日付
-    assert "| 累計 | 1 | 0 | 100.0% |" in rep
+    assert "| 累計 | 1 | 0 | 100.0% | 0 | — |" in rep
     assert "除外した行（1件）" in rep and "99-9" in rep
     assert "警告" in capsys.readouterr().err
 
@@ -109,5 +109,15 @@ def test_main_excludes_invalid_rows_and_writes_file(tmp_path, capsys):
 def test_main_with_empty_log(tmp_path, capsys):
     assert analyze_A.main(["--log", str(tmp_path / "none.csv"), "--date", "2026-10-19"]) == 0
     rep = capsys.readouterr().out
-    assert "| 累計 | 0 | 0 | — |" in rep and "未着手の中分類（23件）" in rep
+    assert "| 累計 | 0 | 0 | — | 0 | — |" in rep and "未着手の中分類（23件）" in rep
     assert "= 1080問" in rep  # 実際の plan_A.csv の合計
+
+
+def test_related_rows_count_for_plan_but_not_for_verdict():
+    rel = row("2026-10-19", "09-3", "A", "正")
+    rel["種別"] = "関連"
+    rows = [row("2026-10-19", "09-3", "B", "誤", "混同"), rel, dict(rel)]
+    rep = analyze_A.build_report(rows, TAX, {"2026-10-19": 40}, "2026-10-19")
+    assert "| 当日 | 1 | 1 | 0.0% | 2 | 100.0% |" in rep
+    assert "| 累計問題数 | 40 | 3 | -37 |" in rep          # 関連も問題数に含める
+    assert "| 09 | データベース | 1 | 1 | 0.0% |" in rep   # 判定は本問だけ

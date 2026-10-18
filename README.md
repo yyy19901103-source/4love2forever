@@ -81,9 +81,17 @@ python mermaid_scheduler.py sample.mmd --json
 | `scripts/analyze_A.py` | 科目A日次レポート（中分類別Wilson 95%区間・上位3中分類・原因別・計画差） |
 | `scripts/analyze_B.py` | 科目B分野別レポートと選択分野の入れ替え判定（6割未満） |
 | `docs/error_log.md` | 誤りの記録 |
+| `docs/taxonomy_tree.md` / `scripts/tree_A.py` | 科目Aの知識体系ツリー |
+| `data/questions/*.jsonl` / `scripts/qbank.py` | 問題バンクの正本と SQLite の作成・検証・収録状況 |
+| `scripts/quiz.py` | 演習：誤答・不明 → 解説と解析 → 関連問題を2〜3問 → 次の本問 |
+| `docs/sources.md` | 問題の出典と利用条件 |
 
 ```bash
-python scripts/add_log.py                                   # 1問記録（q で中断）
+python scripts/quiz.py --mid 09                             # 中分類09を演習（記録は自動）
+python scripts/quiz.py --source 令和6年度秋期 --exam          # 通し演習
+python scripts/quiz.py --weak 3                             # 誤答数上位3中分類（翌朝30分）
+python scripts/qbank.py stats                               # 問題バンクの収録状況
+python scripts/add_log.py                                   # 紙・他サイトで解いた1問を手入力で記録
 python scripts/analyze_A.py                                 # 最新日付の日次レポート
 python scripts/analyze_A.py --date 2026-10-19 --out reports/A_2026-10-19.md
 python scripts/analyze_B.py --since 2026-11-10 --until 2026-11-16

@@ -125,6 +125,7 @@ def collect_row(taxonomy, input_fn=input, output_fn=print, today: date | None = 
     row["誤選択肢が違う理由"] = q("誤選択肢が違う理由: ", parse_required)
     row["解答秒"] = q("解答秒（秒 または 分:秒）: ", parse_seconds)
     row["分析秒"] = q("分析秒（秒 または 分:秒）: ", parse_seconds)
+    row.update(aplib.LOG_A_OPTIONAL)  # 手入力は問題バンク外の本問として記録する
     return row
 
 

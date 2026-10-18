@@ -31,7 +31,7 @@ def test_correct_answer_with_confidence_a_skips_cause(tmp_path):
     assert rows == [{
         "日付": "2026-10-19", "出典": "R6秋", "問番号": "1", "コード": "09-3", "確信度": "A",
         "正誤": "正", "原因": "", "正解の根拠": "根拠", "誤選択肢が違う理由": "理由",
-        "解答秒": "90", "分析秒": "90",
+        "解答秒": "90", "分析秒": "90", "問題ID": "", "種別": "本問",
     }]
     assert not aplib.read_log_a(log, TAX)[1]
 
@@ -89,6 +89,7 @@ def test_decline_or_quit_writes_nothing(tmp_path):
     ({"正誤": "正", "確信度": "A"}, "原因を付けません"),  # 正解なのに原因あり
     ({"解答秒": "1.5"}, "解答秒"),
     ({"日付": "10/19"}, "日付"),
+    ({"種別": "復習"}, "種別"),
 ])
 def test_validate_row_a_rejects_bad_values(changes, message):
     row = {
@@ -100,3 +101,11 @@ def test_validate_row_a_rejects_bad_values(changes, message):
     row.update(changes)
     errors = aplib.validate_row_a(row, TAX)
     assert errors and any(message in e for e in errors)
+
+
+def test_old_log_without_optional_columns_is_read_as_main(tmp_path):
+    log = tmp_path / "old.csv"
+    log.write_text("日付,出典,問番号,コード,確信度,正誤,原因,正解の根拠,誤選択肢が違う理由,解答秒,分析秒\n"
+                   "2026-10-19,R6秋,1,09-3,A,正,,,,60,30\n", encoding="utf-8")
+    rows, warnings = aplib.read_log_a(log, TAX)
+    assert not warnings and rows[0]["種別"] == "本問" and rows[0]["問題ID"] == ""

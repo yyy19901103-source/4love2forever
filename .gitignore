@@ -1,3 +1,5 @@
 __pycache__/
 .pytest_cache/
 reports/
+data/ap_bank.sqlite
+data/*.tmp
