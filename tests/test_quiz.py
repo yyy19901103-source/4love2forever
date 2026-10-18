@@ -109,7 +109,12 @@ def test_main_end_to_end_with_seed_bank(tmp_path):
     log = tmp_path / "log.csv"
     feed = iter(["ア", "B", "1", "根拠", "."] + ["q"])
     out = []
-    rc = quiz.main(["--mid", "9", "--log", str(log), "--db", str(tmp_path / "b.sqlite")],
+    import shutil
+    qdir = tmp_path / "questions"  # 自作問題だけの問題バンクで確かめる（IPA過去問の取り込み有無に左右されない）
+    qdir.mkdir()
+    for f in ("self_made.jsonl", "self_made_2.jsonl"):
+        shutil.copy(aplib.DATA_DIR / "questions" / f, qdir / f)
+    rc = quiz.main(["--mid", "9", "--log", str(log), "--db", str(tmp_path / "b.sqlite"), "--dir", str(qdir)],
                    input_fn=lambda _p: next(feed), output_fn=out.append, clock=FakeClock(), today=TODAY)
     assert rc == 0
     rows, warnings = aplib.read_log_a(log, aplib.load_taxonomy())

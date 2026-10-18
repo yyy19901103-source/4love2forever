@@ -23,7 +23,9 @@ def write_jsonl(path, qs):
 def test_seed_bank_is_valid():
     qs, errors = qbank.load_questions(qbank.question_files(), TAX)
     assert errors == []
-    assert len(qs) >= 15 and all(q["origin"] == "自作" for q in qs)
+    own = [q for q in qs if q["id"].startswith("SELF-")]
+    assert len(own) >= 15 and all(q["origin"] == "自作" for q in own)
+    assert all(q["origin"] == "IPA過去問" for q in qs if q["id"].startswith("AP-"))
 
 
 def test_validation_errors(tmp_path):

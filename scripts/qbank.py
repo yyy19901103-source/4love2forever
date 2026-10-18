@@ -47,7 +47,8 @@ CREATE TABLE questions (
   explanation TEXT NOT NULL DEFAULT '',
   explanation_author TEXT NOT NULL DEFAULT '',
   keywords TEXT NOT NULL DEFAULT '',
-  has_figure INTEGER NOT NULL DEFAULT 0
+  has_figure INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE links (
   question_id TEXT NOT NULL REFERENCES questions(id), site TEXT NOT NULL, url TEXT NOT NULL
@@ -126,11 +127,11 @@ def build(db_path: Path, paths, taxonomy) -> tuple[int, list[str]]:
             for r in taxonomy.values()])
         for q in questions:
             c = q["choices"]
-            con.execute("INSERT INTO questions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+            con.execute("INSERT INTO questions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
                 q["id"], q["origin"], q["source"], q["code"], q["stem"],
                 c["ア"], c["イ"], c["ウ"], c["エ"], q["answer"],
                 q.get("explanation", ""), q.get("explanation_author", ""),
-                " ".join(q.get("keywords", [])), int(bool(q.get("has_figure")))))
+                " ".join(q.get("keywords", [])), int(bool(q.get("has_figure"))), q.get("note", "")))
             con.executemany("INSERT INTO links VALUES (?,?,?)",
                             [(q["id"], l["site"], l["url"]) for l in q.get("links", [])])
     con.close()

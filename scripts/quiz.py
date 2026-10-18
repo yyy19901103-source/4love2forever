@@ -73,7 +73,9 @@ class Session:
         self.out("")
         self.out(f"【{label}】{question['id']}  {question['code']} {question['mid']} / {question['small']}  出典: {question['source']}")
         if question["has_figure"]:
-            self.out("  ※ 図表あり。出典URLの原本で図を確認してください")
+            self.out("  ※ 図表あり。原本の図を確認してください")
+        if question.get("note"):
+            self.out(f"  ※ {question['note']}")
         self.out(question["stem"])
         for k, v in question["choices"].items():
             self.out(f"  {k} {v}")
