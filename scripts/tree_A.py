@@ -1,27 +1,44 @@
 """AP 科目Aの知識体系（taxonomy.csv）をツリー表示する。
 
-使い方: python scripts/tree_A.py [--out docs/taxonomy_tree.md]
+使い方: python scripts/tree_A.py [--detail] [--out docs/taxonomy_tree.md]
+--detail を付けると、小分類ごとの学習項目（data/knowledge_items.csv）も表示する。
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 
 import aplib
 
+KNOWLEDGE_PATH = aplib.DATA_DIR / "knowledge_items.csv"
 
-def build_tree(taxonomy) -> str:
+
+def load_knowledge(path: Path = KNOWLEDGE_PATH) -> dict[str, list[str]]:
+    """コード → 学習項目のリスト（CSV の並び順）。"""
+    items: dict[str, list[str]] = {}
+    with open(path, encoding=aplib.ENCODING, newline="") as f:
+        for row in csv.DictReader(f):
+            items.setdefault(row["コード"], []).append(row["項目"])
+    return items
+
+
+def build_tree(taxonomy, knowledge: dict[str, list[str]] | None = None) -> str:
     # 分野 → 大分類 → 中分類 → 小分類 の順に、CSV の並び（番号順）を保って入れ子にする
     tree: dict = {}
     for row in taxonomy.values():
         major = f"{row['大分類番号']} {row['大分類']}"
         mid = f"{row['中分類番号']} {row['中分類']}"
-        tree.setdefault(row["分野"], {}).setdefault(major, {}).setdefault(mid, []).append(
-            f"{row['コード']} {row['小分類']}")
+        small = f"{row['コード']} {row['小分類']}"
+        if knowledge is not None:
+            small += "：" + "、".join(knowledge.get(row["コード"], ["（未登録）"]))
+        tree.setdefault(row["分野"], {}).setdefault(major, {}).setdefault(mid, []).append(small)
 
     counts = {f: sum(len(s) for m in majors.values() for s in m.values()) for f, majors in tree.items()}
     lines = [f"AP 科目A（3分野・9大分類・23中分類・{len(taxonomy)}小分類）"]
+    if knowledge is not None:
+        lines[0] += f"　学習項目 {sum(len(knowledge.get(c, [])) for c in taxonomy)}"
 
     def branch(items, prefix):
         for i, item in enumerate(items):
@@ -42,13 +59,17 @@ def build_tree(taxonomy) -> str:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--taxonomy", type=Path, default=aplib.TAXONOMY_PATH)
+    p.add_argument("--detail", action="store_true", help="小分類ごとの学習項目も表示する")
     p.add_argument("--out", type=Path, help="Markdown の出力先（省略時は標準出力）")
     args = p.parse_args(argv)
-    tree = build_tree(aplib.load_taxonomy(args.taxonomy))
+    tree = build_tree(aplib.load_taxonomy(args.taxonomy), load_knowledge() if args.detail else None)
     if args.out:
+        note = ("学習項目は data/knowledge_items.csv。根拠区分＝推定（Claude の知識による整理。"
+                "IPA シラバス Ver.7.2 の用語例との照合は未実施）。\n\n" if args.detail else "")
+        cmd = "python scripts/tree_A.py" + (" --detail" if args.detail else "") + f" --out {args.out.as_posix()}"
         args.out.write_text("# AP 科目A 知識体系ツリー\n\n"
-                            "`python scripts/tree_A.py --out docs/taxonomy_tree.md` で data/taxonomy.csv から生成。"
-                            "記録コードは「中分類2桁-小分類番号」。\n\n```text\n" + tree + "```\n", encoding="utf-8")
+                            f"`{cmd}` で data/taxonomy.csv から生成。記録コードは「中分類2桁-小分類番号」。\n\n"
+                            + note + "```text\n" + tree + "```\n", encoding="utf-8")
     else:
         sys.stdout.write(tree)
     return 0
