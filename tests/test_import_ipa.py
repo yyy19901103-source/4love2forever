@@ -62,10 +62,23 @@ def test_imported_banks_are_valid_and_complete():
     tax = aplib.load_taxonomy()
     import qbank
     files = sorted((aplib.DATA_DIR / "questions").glob("ipa_*.jsonl"))
-    assert files
+    assert len(files) == 8  # 令和4〜7年度の春期・秋期
     qs, errors = qbank.load_questions(files, tax)
     assert errors == []
     for f in files:
         rows = [json.loads(line) for line in open(f, encoding="utf-8")]
         assert len(rows) == 80 and [r["id"][-2:] for r in rows] == [f"{n:02d}" for n in range(1, 81)]
         assert all(r["origin"] == "IPA過去問" and r["answer"] in I.LABELS and r["note"] for r in rows)
+
+
+def test_split_questions_resyncs_after_lost_headings():
+    # 問2・問3 の見出しが（ページの欠落などで）読めなくても、次の「問4」で番号が合い直す
+    pages = ["問1 一問目\nア a イ b ウ c エ d\n文字化けした行\n", "問4 四問目\nア a イ b ウ c エ d\n問5 五問目\n"]
+    qs = I.split_questions(pages, expected=5)
+    assert sorted(qs) == [1, 4, 5]
+
+
+def test_manual_answers_used_when_pdf_has_no_text():
+    ans = I.load_manual_answers("2022r04h")
+    assert len(ans) == 80 and ans[1] == ("ア", "T") and ans[51][1] == "M" and ans[80] == ("エ", "S")
+    assert I.load_manual_answers("1999r99a") == {}

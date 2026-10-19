@@ -98,13 +98,28 @@ def fix_digits(jpn: list[dict], eng: list[dict]) -> int:
     return changed
 
 
+def upright(img: Path, env) -> Path:
+    """ページの向きを判定し、回転しているページ（上下逆さまなど）は正立させた画像を返す。"""
+    osd = subprocess.run(["tesseract", str(img), "-", "--psm", "0"], capture_output=True, text=True, env=env, timeout=120)
+    rotate = re.search(r"Rotate:\s*(\d+)", osd.stdout + osd.stderr)
+    conf = re.search(r"Orientation confidence:\s*([\d.]+)", osd.stdout + osd.stderr)
+    if not rotate or rotate.group(1) == "0" or not conf or float(conf.group(1)) < 5:
+        return img
+    from PIL import Image
+    fixed = img.with_name(img.stem + "_upright.png")
+    # tesseract の Rotate は「時計回りに何度回せば正立するか」。PIL の rotate は反時計回りなので符号を反転する
+    Image.open(img).rotate(-int(rotate.group(1)), expand=True).save(fixed)
+    return fixed
+
+
 def ocr_pages(qs_pdf: Path, workdir: Path) -> tuple[list[str], int]:
     """ページごとのテキストと、数字を直した単語の数を返す。"""
     subprocess.run(["pdfimages", "-j", str(qs_pdf), str(workdir / "p")], check=True)
-    images = sorted(workdir.glob("p-*.jpg"))
+    images = sorted(p for p in workdir.glob("p-*.jpg"))
     env = dict(os.environ, OMP_THREAD_LIMIT="1")  # 1プロセス1スレッドにしないと並列時に極端に遅くなる
 
     def run(img: Path) -> tuple[str, int]:
+        img = upright(img, env)
         jpn, eng = _tsv_words(img, "jpn", env), _tsv_words(img, "eng", env)
         changed = fix_digits(jpn, eng)
         lines: dict = {}
@@ -158,8 +173,8 @@ def split_questions(pages: list[str], expected: int = 80) -> dict[int, dict]:
     """ページのテキストを問ごとに分ける。
 
     「問＋数字」の行を見出しの候補とし、番号は前後関係で確定する。
-    - 直前の問の選択肢を エ まで読んでいれば次の問とみなし、番号は直前＋1（読み取った番号が＋2なら見出し1つの読み落とし）。
-    - エ まで読んでいなければ（選択肢が図の中にある問など）、読み取った番号が＋1か＋2のときだけ見出しとみなす。
+    - 読み取った番号の候補（0 と 9 の読み替えを含む）が直前＋1〜＋6 にあれば、その最小のものを採る。
+    - なければ、直前の問の選択肢を エ まで読んでいるときだけ次の問（直前＋1）とみなす。
     """
     questions: dict[int, dict] = {}
     current, seen_last_choice = 0, True
@@ -171,11 +186,10 @@ def split_questions(pages: list[str], expected: int = 80) -> dict[int, dict]:
             m = re.match(r"^問\s*(\d{1,2})\s*(.*)$", line)
             n = None
             if m:
-                variants = number_variants(m.group(1))
-                if str(current + 1) in variants:
-                    n = current + 1
-                elif str(current + 2) in variants:
-                    n = current + 2
+                # 候補のうち直前＋1〜＋6の最小のものを採る（見出しの読み落としやページ単位の欠落から番号を合わせ直す）
+                near = sorted(int(v) for v in number_variants(m.group(1)) if current < int(v) <= current + 6)
+                if near:
+                    n = near[0]
                 elif seen_last_choice:
                     n = current + 1
             if n and n <= expected:
@@ -268,10 +282,26 @@ def guess_code(text: str, field: str, smalls: dict, notes: dict) -> tuple[str, l
     return best, sorted(hits[best], key=len, reverse=True)
 
 
+MANUAL_ANSWERS_DIR = aplib.DATA_DIR / "answers_manual"
+
+
+def load_manual_answers(exam: str) -> dict[int, tuple[str, str]]:
+    """解答例 PDF に文字データがない回のために、目視で転記した正解表（data/answers_manual/<exam>.csv）を読む。"""
+    path = MANUAL_ANSWERS_DIR / f"{exam}.csv"
+    if not path.exists():
+        return {}
+    rows = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln and not ln.startswith("#")]
+    return {int(n): (a, f) for n, a, f in (r.split(",") for r in rows[1:])}
+
+
 def build(qs_pdf: Path, ans_pdf: Path, exam: str) -> tuple[list[dict], list[str]]:
     label = exam_label(exam)
     answers = parse_answers(subprocess.run(["pdftotext", "-layout", str(ans_pdf), "-"],
                                            capture_output=True, text=True, check=True).stdout)
+    answer_basis = "解答例PDFの文字データ"
+    if not answers:
+        answers = load_manual_answers(exam)
+        answer_basis = "解答例PDFの画像から目視で転記（data/answers_manual）"
     cache = Path(tempfile.gettempdir()) / f"ap_ocr_{exam}_{qs_pdf.stat().st_size}.json"
     if cache.exists():
         pages, digit_fixes = json.loads(cache.read_text(encoding="utf-8"))
@@ -316,7 +346,7 @@ def build(qs_pdf: Path, ans_pdf: Path, exam: str) -> tuple[list[dict], list[str]
         })
         if missing:
             problems.append(f"問{n}: 選択肢 {''.join(missing)} を文字で取れませんでした（図表として扱う）")
-    problems.insert(0, f"数字を英語モデルで直した単語：{digit_fixes}件")
+    problems.insert(0, f"数字を英語モデルで直した単語：{digit_fixes}件。正解の出典：{answer_basis}")
     return out, problems
 
 
