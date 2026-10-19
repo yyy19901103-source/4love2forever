@@ -1,6 +1,7 @@
 """科目Bの分野別レポートと、選択分野の入れ替え判定を Markdown で出力する。
 
-使い方: python scripts/analyze_B.py [--since 2026-11-10 --until 2026-11-16] [--out report.md]
+使い方: python scripts/analyze_B.py [--from B1 --to B7] [--out report.md]
+日目は B1〜B26（「B3」「3」どちらの表記でも可）。
 本命分野の平均得点率が6割未満なら、予備分野（6割以上が条件）と入れ替える案を出す。
 """
 from __future__ import annotations
@@ -9,7 +10,6 @@ import argparse
 import csv
 import sys
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 import aplib
@@ -18,6 +18,7 @@ PASS_RATE = 60.0                      # 得点率（%）の基準
 MIN_PER_QUESTION = 150 / 5            # 150分で5問 → 30分/問（推定の配分）
 DEFAULT_MAIN = ("プロジェクトマネジメント", "データベース", "システム監査", "経営戦略")
 DEFAULT_RESERVE = ("サービスマネジメント",)
+B_DAYS = 26                           # 科目Bの日程 B1〜B26
 
 
 @dataclass
@@ -46,15 +47,19 @@ def _number(v: str) -> float | None:
         return None
 
 
+def parse_b_day(v: str) -> int | None:
+    """「B3」「b3」「3」→ 3。範囲外や不正な値は None。"""
+    v = v.strip().upper().removeprefix("B")
+    return int(v) if v.isdigit() and 1 <= int(v) <= B_DAYS else None
+
+
 def validate_row_b(row: dict[str, str]) -> list[str]:
     missing = [c for c in aplib.LOG_B_COLUMNS if c not in row]
     if missing:
         return [f"列が不足しています: {missing}"]
     errors = []
-    try:
-        date.fromisoformat(row["日付"])
-    except ValueError:
-        errors.append(f"日付は YYYY-MM-DD 形式にしてください: {row['日付']!r}")
+    if parse_b_day(row["日目"]) is None:
+        errors.append(f"日目は B1〜B{B_DAYS}（または1〜{B_DAYS}）です: {row['日目']!r}")
     if not row["分野"].strip():
         errors.append("分野が空です")
     score = _number(row["得点率"])
@@ -174,19 +179,20 @@ def build_report(rows, main, reserve, warnings=(), period: str = "全期間") ->
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--log", type=Path, default=aplib.LOG_B_PATH)
-    p.add_argument("--since", help="集計開始日（両端を含む）")
-    p.add_argument("--until", help="集計終了日（両端を含む）")
+    p.add_argument("--from", dest="start", help="集計開始の日目（両端を含む、例 B1）")
+    p.add_argument("--to", dest="end", help="集計終了の日目（両端を含む、例 B7）")
     p.add_argument("--main", default=",".join(DEFAULT_MAIN), help="本命分野（カンマ区切り）")
     p.add_argument("--reserve", default=",".join(DEFAULT_RESERVE), help="予備分野（カンマ区切り）")
     p.add_argument("--out", type=Path)
     args = p.parse_args(argv)
 
-    for d in (args.since, args.until):
-        if d:
-            date.fromisoformat(d)
+    start = parse_b_day(args.start) if args.start else 1
+    end = parse_b_day(args.end) if args.end else B_DAYS
+    if start is None or end is None or start > end:
+        p.error(f"--from / --to は B1〜B{B_DAYS} で、from ≦ to にしてください")
     rows, warnings = read_log_b(args.log)
-    rows = [r for r in rows if (not args.since or r["日付"] >= args.since) and (not args.until or r["日付"] <= args.until)]
-    period = f"{args.since or '最初'}〜{args.until or '最新'}" if args.since or args.until else "全期間"
+    rows = [r for r in rows if start <= parse_b_day(r["日目"]) <= end]
+    period = f"B{start}〜B{end}" if args.start or args.end else "全期間"
     main_fields = tuple(f.strip() for f in args.main.split(",") if f.strip())
     reserve_fields = tuple(f.strip() for f in args.reserve.split(",") if f.strip())
     report = build_report(rows, main_fields, reserve_fields, warnings, period)

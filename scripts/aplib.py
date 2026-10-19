@@ -15,17 +15,15 @@ PLAN_A_PATH = DATA_DIR / "plan_A.csv"
 # Excel で開いても文字化けしないよう BOM 付き UTF-8 で書き、読むときは BOM の有無を問わない
 ENCODING = "utf-8-sig"
 
-LOG_A_REQUIRED = [
-    "日付", "出典", "問番号", "コード", "確信度", "正誤", "原因",
+LOG_A_COLUMNS = [
+    "日目", "種別", "初見", "出典", "問番号", "コード", "確信度", "正誤", "原因",
     "正解の根拠", "誤選択肢が違う理由", "解答秒", "分析秒",
 ]
-# 問題ID（問題バンクの id、手入力なら空）と種別（本問／関連）は末尾に追加した任意列。
-# 列のない古いログは 問題ID=空・種別=本問 として読む。
-LOG_A_OPTIONAL = {"問題ID": "", "種別": "本問"}
-LOG_A_COLUMNS = LOG_A_REQUIRED + list(LOG_A_OPTIONAL)
-KINDS = ("本問", "関連")
+KINDS = ("通し", "分野別", "弱点", "復習")
+FIRST_SEEN = ("Y", "N")
+PLAN_DAYS = 17  # 科目A は1〜17日目（17日目＝試験前日）
 LOG_B_COLUMNS = [
-    "日付", "出典", "問番号", "分野", "得点率", "所要分",
+    "日目", "出典", "問番号", "分野", "得点率", "所要分",
     "失点した設問", "原因", "書けなかった根拠の位置",
 ]
 
@@ -43,6 +41,22 @@ B_FIELDS = (
 )
 B_FIELD_ALIASES = {"情報戦略": "経営戦略", "戦略立案・コンサルティングの技法": "経営戦略"}
 B_REQUIRED_FIELD = "情報セキュリティ"
+
+# 優先度（平均出題数×誤答率）に使う6分野。平均出題数は CLAUDE.md（ITEC分析、R6秋・R7春・R7秋の平均、80問中）。
+FIELD_GROUPS = {
+    "基礎理論": (range(1, 3), 7.0),
+    "コンピュータシステム": (range(3, 7), 15.7),
+    "技術要素": (range(7, 12), 22.3),
+    "開発技術": (range(12, 14), 5.0),
+    "マネジメント": (range(14, 17), 10.0),
+    "ストラテジ": (range(17, 24), 20.0),
+}
+
+
+def field_group(code: str) -> str:
+    """小分類コード（例 09-3）→ 6分野の名前。"""
+    mid = int(code[:2])
+    return next(name for name, (mids, _) in FIELD_GROUPS.items() if mid in mids)
 
 
 def load_taxonomy(path: Path = TAXONOMY_PATH) -> dict[str, dict[str, str]]:
@@ -62,20 +76,25 @@ def is_effective_wrong(row: dict[str, str]) -> bool:
     return row["正誤"] == "誤" or row["確信度"] == "C"
 
 
+def needs_analysis(row: dict[str, str]) -> bool:
+    """分析が必要な行（誤答、または確信度B/C）。確信度Aの正解は分析を省いてよい。"""
+    return row["正誤"] == "誤" or row["確信度"] in ("B", "C")
+
+
 def validate_row_a(row: dict[str, str], taxonomy: dict[str, dict[str, str]]) -> list[str]:
     """科目Aログ1行を検証し、エラーメッセージの一覧を返す（空なら正常）。"""
-    from datetime import date
-
-    errors = []
-    missing = [c for c in LOG_A_REQUIRED if c not in row]
+    missing = [c for c in LOG_A_COLUMNS if c not in row]
     if missing:
         return [f"列が不足しています: {missing}"]
-    if (row.get("種別") or "本問") not in KINDS:
-        errors.append(f"種別は 本問/関連 のいずれかです: {row['種別']!r}")
-    try:
-        date.fromisoformat(row["日付"])
-    except ValueError:
-        errors.append(f"日付は YYYY-MM-DD 形式にしてください: {row['日付']!r}")
+    errors = []
+    if not (row["日目"].isdigit() and 1 <= int(row["日目"]) <= PLAN_DAYS):
+        errors.append(f"日目は 1〜{PLAN_DAYS} の整数です: {row['日目']!r}")
+    if row["種別"] not in KINDS:
+        errors.append(f"種別は {'/'.join(KINDS)} のいずれかです: {row['種別']!r}")
+    if row["初見"] not in FIRST_SEEN:
+        errors.append(f"初見は Y/N のいずれかです: {row['初見']!r}")
+    elif row["種別"] == "復習" and row["初見"] == "Y":
+        errors.append("復習の行は初見＝N です")
     for col in ("出典", "問番号"):
         if not row[col].strip():
             errors.append(f"{col}が空です")
@@ -92,9 +111,8 @@ def validate_row_a(row: dict[str, str], taxonomy: dict[str, dict[str, str]]) -> 
         elif row["原因"]:
             errors.append("確信度A/Bの正解には原因を付けません")
     for col in ("解答秒", "分析秒"):
-        v = row[col]
-        if not v.isdigit():
-            errors.append(f"{col}は0以上の整数（秒）です: {v!r}")
+        if not row[col].isdigit():
+            errors.append(f"{col}は0以上の整数（秒）です: {row[col]!r}")
     return errors
 
 
@@ -105,14 +123,23 @@ def read_log_a(path: Path, taxonomy: dict[str, dict[str, str]]) -> tuple[list[di
     rows, warnings = [], []
     with open(path, encoding=ENCODING, newline="") as f:
         for lineno, row in enumerate(csv.DictReader(f), start=2):
-            for col, default in LOG_A_OPTIONAL.items():
-                row[col] = row.get(col) or default
+            row = {k: (v or "") for k, v in row.items() if k}
             errs = validate_row_a(row, taxonomy)
             if errs:
                 warnings.append(f"{path.name} {lineno}行目を除外: {'; '.join(errs)}")
             else:
                 rows.append(row)
     return rows, warnings
+
+
+def question_key(row: dict[str, str]) -> tuple[str, str]:
+    """同じ問題を見分けるキー（出典, 問番号）。"""
+    return row["出典"].strip(), row["問番号"].strip()
+
+
+def exam_key(source: str) -> str:
+    """通しの回を見分けるキー。問題バンクの出典（「令和7年度秋期 AP 午前 問1（原本 p.4）」）は回の部分だけを使う。"""
+    return source.split(" AP ")[0].strip()
 
 
 def append_row(path: Path, columns: list[str], row: dict[str, str]) -> None:

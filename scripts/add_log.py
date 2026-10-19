@@ -2,12 +2,13 @@
 
 使い方: python scripts/add_log.py [--log PATH] [--taxonomy PATH]
 各項目は入力時に検証し、不正なら再入力を求める。最後に確認してから追記する。
+日目の既定値はログの最後の日目、初見の既定値は同じ出典・問番号の行がログにあるかで決める。
+分析（正解の根拠・誤選択肢が違う理由・分析秒）は、誤答と確信度B/Cのときだけ尋ねる。
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
 from pathlib import Path
 from typing import Callable
 
@@ -35,13 +36,25 @@ def ask(prompt: str, parse: Callable[[str], str], input_fn=input, output_fn=prin
             output_fn(f"  ! {e}")
 
 
-def parse_date(raw: str, today: date) -> str:
+def parse_day(raw: str, default: int) -> str:
     if not raw:
-        return today.isoformat()
-    try:
-        return date.fromisoformat(raw).isoformat()
-    except ValueError:
-        raise ValueError("YYYY-MM-DD 形式で入力してください") from None
+        return str(default)
+    if raw.isdigit() and 1 <= int(raw) <= aplib.PLAN_DAYS:
+        return str(int(raw))
+    raise ValueError(f"1〜{aplib.PLAN_DAYS} の整数で入力してください")
+
+
+def make_choice_parser(options: tuple[str, ...], default: str | None = None):
+    def parse(raw: str) -> str:
+        if not raw and default:
+            return default
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return options[int(raw) - 1]
+        v = raw.upper() if raw.isascii() else raw
+        if v in options:
+            return v
+        raise ValueError(f"{' / '.join(options)} から選んでください（番号でも可）")
+    return parse
 
 
 def parse_required(raw: str) -> str:
@@ -99,46 +112,53 @@ def parse_seconds(raw: str) -> str:
     raise ValueError("0以上の整数（秒）か 分:秒 で入力してください")
 
 
-def collect_row(taxonomy, input_fn=input, output_fn=print, today: date | None = None) -> dict[str, str]:
-    today = today or date.today()
-
+def collect_row(taxonomy, input_fn=input, output_fn=print, log_rows=()) -> dict[str, str]:
     def q(prompt, parse):
         return ask(prompt, parse, input_fn, output_fn)
 
+    last_day = max((int(r["日目"]) for r in log_rows), default=1)
+    seen = {aplib.question_key(r) for r in log_rows}
     row = {}
-    row["日付"] = q(f"日付 [{today.isoformat()}]: ", lambda r: parse_date(r, today))
+    row["日目"] = q(f"日目 [{last_day}]: ", lambda r: parse_day(r, last_day))
+    kinds = " / ".join(f"{i}={k}" for i, k in enumerate(aplib.KINDS, start=1))
+    row["種別"] = q(f"種別 {kinds}: ", make_choice_parser(aplib.KINDS))
     row["出典"] = q("出典（例: R6秋）: ", parse_required)
     row["問番号"] = q("問番号: ", parse_required)
+    first = "N" if row["種別"] == "復習" or aplib.question_key(row) in seen else "Y"
+    row["初見"] = q(f"初見 Y/N [{first}]: ", make_choice_parser(aplib.FIRST_SEEN, first))
     row["コード"] = q("コード（中分類-小分類、例 09-3）: ", make_code_parser(taxonomy))
     t = taxonomy[row["コード"]]
     output_fn(f"  → {t['中分類']} / {t['小分類']}")
     row["確信度"] = q("確信度 A=確信 / B=半々 / C=勘: ", parse_confidence)
     row["正誤"] = q("正誤 正(o) / 誤(x): ", parse_correctness)
+    row["原因"] = row["正解の根拠"] = row["誤選択肢が違う理由"] = ""
+    row["分析秒"] = "0"
     if aplib.is_effective_wrong(row):
         if row["正誤"] == "正":
             output_fn("  → 確信度Cの正解は実質誤答として扱います")
         menu = " / ".join(f"{i}={c}" for i, c in enumerate(aplib.CAUSES, start=1))
         row["原因"] = q(f"原因 {menu}: ", parse_cause)
-    else:
-        row["原因"] = ""
-    row["正解の根拠"] = q("正解の根拠: ", parse_required)
-    row["誤選択肢が違う理由"] = q("誤選択肢が違う理由: ", parse_required)
     row["解答秒"] = q("解答秒（秒 または 分:秒）: ", parse_seconds)
-    row["分析秒"] = q("分析秒（秒 または 分:秒）: ", parse_seconds)
-    row.update(aplib.LOG_A_OPTIONAL)  # 手入力は問題バンク外の本問として記録する
+    if aplib.needs_analysis(row):
+        row["正解の根拠"] = q("正解の根拠: ", parse_required)
+        row["誤選択肢が違う理由"] = q("誤選択肢が違う理由: ", parse_required)
+        row["分析秒"] = q("分析秒（秒 または 分:秒）: ", parse_seconds)
+    else:
+        output_fn("  → 確信度Aの正解なので分析は省きます")
     return row
 
 
-def main(argv=None, input_fn=input, output_fn=print, today: date | None = None) -> int:
+def main(argv=None, input_fn=input, output_fn=print) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--log", type=Path, default=aplib.LOG_A_PATH)
     p.add_argument("--taxonomy", type=Path, default=aplib.TAXONOMY_PATH)
     args = p.parse_args(argv)
 
     taxonomy = aplib.load_taxonomy(args.taxonomy)
+    log_rows, _ = aplib.read_log_a(args.log, taxonomy)
     output_fn("科目A ログ入力（q で中断）")
     try:
-        row = collect_row(taxonomy, input_fn, output_fn, today)
+        row = collect_row(taxonomy, input_fn, output_fn, log_rows)
         errors = aplib.validate_row_a(row, taxonomy)
         if errors:  # 各項目を検証済みなので通常は起こらないが、書き込み前の最終防壁とする
             for e in errors:

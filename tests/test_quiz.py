@@ -1,11 +1,7 @@
+import json
 import csv
-from datetime import date
-
 import aplib
 import quiz
-
-TODAY = date(2026, 10, 19)
-
 
 def q(id, code, answer="イ", stem=""):
     return {"id": id, "origin": "自作", "source": "テスト", "code": code, "mid_no": code[:2], "mid": "中",
@@ -31,7 +27,7 @@ def run(tmp_path, answers, mains, **kw):
     feed = iter(answers)
     out = []
     s = quiz.Session(POOL, [], log, input_fn=lambda _p: next(feed), output_fn=out.append,
-                     clock=FakeClock(), today=TODAY, **kw)
+                     clock=FakeClock(), **kw)
     s.run(mains)
     rows = list(csv.DictReader(open(log, encoding=aplib.ENCODING))) if log.exists() else []
     return rows, out
@@ -43,9 +39,9 @@ NG = ["ア", "B", "1", "根拠", "."]           # 誤答・原因=知識不足
 
 def test_wrong_answer_triggers_related_and_stops_after_two_correct(tmp_path):
     rows, out = run(tmp_path, NG + OK + OK + OK, [POOL[0], POOL[5]])
-    kinds = [(r["問題ID"], r["種別"]) for r in rows]
-    # M1 誤答 → 関連 R1, R2 を連続正解で打ち切り → 次の本問 M2
-    assert kinds == [("M1", "本問"), ("R1", "関連"), ("R2", "関連"), ("M2", "本問")]
+    # M1 誤答 → 関連 R1, R2 を連続正解で打ち切り → 次の M2。関連も同じ種別（分野別）・初見Yで記録
+    assert [(r["問番号"], r["種別"], r["初見"], r["日目"]) for r in rows] == [
+        ("M1", "分野別", "Y", "1"), ("R1", "分野別", "Y", "1"), ("R2", "分野別", "Y", "1"), ("M2", "分野別", "Y", "1")]
     assert rows[0]["原因"] == "知識不足" and rows[0]["誤選択肢が違う理由"] == "DB解説参照"
     assert any("2問続けて正解" in line for line in out)
     assert any("正解は イ" in line for line in out)
@@ -54,20 +50,19 @@ def test_wrong_answer_triggers_related_and_stops_after_two_correct(tmp_path):
 def test_related_max_three_and_no_nested_chain(tmp_path):
     # 関連1で誤答 → 関連2正解 → 関連3誤答（ここで最大3問）。関連の誤答から派生はしない
     rows, _ = run(tmp_path, NG + NG + OK + NG + OK, [POOL[0], POOL[5]])
-    assert [r["種別"] for r in rows] == ["本問", "関連", "関連", "関連", "本問"]
-    assert [r["問題ID"] for r in rows][1:4] == ["R1", "R2", "R3"]
+    assert [r["問番号"] for r in rows] == ["M1", "R1", "R2", "R3", "M2"]
 
 
 def test_confidence_c_correct_is_treated_as_unknown(tmp_path):
     rows, out = run(tmp_path, ["イ", "C", "2", "根拠", "理由"] + OK + OK, [POOL[0]])
     assert rows[0]["正誤"] == "正" and rows[0]["原因"] == "混同"
-    assert [r["種別"] for r in rows] == ["本問", "関連", "関連"]
+    assert [r["問番号"] for r in rows] == ["M1", "R1", "R2"]
     assert any("実質誤答" in line for line in out)
 
 
 def test_quota_counts_related_questions(tmp_path):
     rows, out = run(tmp_path, NG + OK + OK, [POOL[0], POOL[5]], quota=2)
-    assert [r["問題ID"] for r in rows] == ["M1", "R1"]
+    assert [r["問番号"] for r in rows] == ["M1", "R1"]
     assert any("上限" in line for line in out)
 
 
@@ -77,8 +72,8 @@ def test_no_related_candidate_message(tmp_path):
 
 
 def test_exam_mode_defers_feedback_and_skips_related(tmp_path):
-    rows, out = run(tmp_path, ["ア", "B", "イ", "A"] + ["4", "根拠", "理由"] + [""], [POOL[0], POOL[5]], exam=True, quota=80)
-    assert [(r["問題ID"], r["正誤"], r["種別"]) for r in rows] == [("M1", "誤", "本問"), ("M2", "正", "本問")]
+    rows, out = run(tmp_path, ["ア", "B", "イ", "A"] + ["4", "根拠", "理由"] + [""], [POOL[0], POOL[5]], kind="通し", quota=80)
+    assert [(r["問番号"], r["正誤"], r["種別"]) for r in rows] == [("M1", "誤", "通し"), ("M2", "正", "通し")]
     assert rows[0]["原因"] == "読み違い"
     first_feedback = next(i for i, line in enumerate(out) if "不正解" in line)
     assert first_feedback > next(i for i, line in enumerate(out) if "通し終了" in line)
@@ -92,12 +87,35 @@ def test_times_are_measured(tmp_path):
 
 def test_quit_keeps_finished_rows(tmp_path):
     rows, out = run(tmp_path, OK + ["q"], [POOL[5], POOL[0]])
-    assert [r["問題ID"] for r in rows] == ["M2"] and any("中断" in line for line in out)
+    assert [r["問番号"] for r in rows] == ["M2"] and any("中断" in line for line in out)
+
+
+def test_confident_correct_skips_analysis_but_b_correct_asks(tmp_path):
+    rows, _ = run(tmp_path, OK + ["イ", "B", "根拠B", "理由B"], [POOL[5], POOL[4]], related=False)
+    assert (rows[0]["正解の根拠"], rows[1]["正解の根拠"], rows[1]["原因"]) == ("", "根拠B", "")
+    assert all(aplib.validate_row_a(r, aplib.load_taxonomy()) == [] for r in rows)
+
+
+def test_seen_question_is_not_first_and_review_kind_is_always_n(tmp_path):
+    log = tmp_path / "log_A.csv"
+    feed = iter(OK + OK)
+    old = [{"出典": "テスト", "問番号": "M2"}]
+    quiz.Session(POOL, old, log, input_fn=lambda _p: next(feed), output_fn=lambda _x: None,
+                 clock=FakeClock(), day=3, kind="弱点").run([POOL[5], POOL[4]])
+    rows = list(csv.DictReader(open(log, encoding=aplib.ENCODING)))
+    assert [(r["問番号"], r["初見"], r["種別"], r["日目"]) for r in rows] == [("M2", "N", "弱点", "3"), ("R4", "Y", "弱点", "3")]
+    feed = iter(OK)
+    log2 = tmp_path / "log2.csv"
+    s = quiz.Session(POOL, [], log2, input_fn=lambda _p: next(feed), output_fn=lambda _x: None,
+                     clock=FakeClock(), day=4, kind="復習")
+    s.run([POOL[5]])
+    r = next(csv.DictReader(open(log2, encoding=aplib.ENCODING)))
+    assert (r["種別"], r["初見"]) == ("復習", "N") and not s.related
 
 
 def test_select_mains_filters():
     tax = aplib.load_taxonomy()
-    log = [dict(問題ID="M1", 種別="本問", コード="09-3", 確信度="B", 正誤="誤")]
+    log = [dict(出典="テスト", 問番号="M1", 種別="分野別", 初見="Y", コード="09-3", 確信度="B", 正誤="誤")]
     assert [x["id"] for x in quiz.select_mains(POOL, log, tax, mids=["09"])] == ["R1", "R2", "R3", "R4"]
     assert "M1" in [x["id"] for x in quiz.select_mains(POOL, log, tax, mids=["09"], include_seen=True)]
     # 誤答上位1中分類 = 09
@@ -114,12 +132,24 @@ def test_main_end_to_end_with_seed_bank(tmp_path):
     qdir.mkdir()
     for f in ("self_made.jsonl", "self_made_2.jsonl"):
         shutil.copy(aplib.DATA_DIR / "questions" / f, qdir / f)
-    rc = quiz.main(["--mid", "9", "--log", str(log), "--db", str(tmp_path / "b.sqlite"), "--dir", str(qdir)],
-                   input_fn=lambda _p: next(feed), output_fn=out.append, clock=FakeClock(), today=TODAY)
+    common = ["--log", str(log), "--db", str(tmp_path / "b.sqlite"), "--dir", str(qdir)]
+    rc = quiz.main(["--day", "3", "--mid", "9"] + common,
+                   input_fn=lambda _p: next(feed), output_fn=out.append, clock=FakeClock())
     assert rc == 0
     rows, warnings = aplib.read_log_a(log, aplib.load_taxonomy())
-    assert not warnings and rows[0]["問題ID"] == "SELF-09-2-001"
-    assert any("上限 40問" in line for line in out)  # 10/19 の計画は40問
+    assert not warnings and rows[0]["問番号"] == "SELF-09-2-001" and rows[0]["日目"] == "3"
+    assert any("上限 40問" in line for line in out)  # plan_A.csv の3日目は40問
+    # 翌日（4日目）の解き直し：3日目の誤答が出題され、種別＝復習・初見＝N で記録される
+    out.clear()
+    answer = next(json.loads(ln)["answer"] for ln in open(qdir / "self_made.jsonl", encoding="utf-8")
+                  if json.loads(ln)["id"] == "SELF-09-2-001")
+    feed = iter([answer, "A", ""])
+    assert quiz.main(["--day", "4", "--review"] + common, input_fn=lambda _p: next(feed), output_fn=out.append,
+                     clock=FakeClock()) == 0
+    rows, _ = aplib.read_log_a(log, aplib.load_taxonomy())
+    assert [(r["問番号"], r["種別"], r["初見"], r["日目"]) for r in rows][-1] == ("SELF-09-2-001", "復習", "N", "4")
+    # 解き直す問題がなければ 1 を返す
+    assert quiz.main(["--day", "4", "--review"] + common, output_fn=out.append) == 1
 
 
 def test_drill_pool_excludes_reserved_exams(tmp_path):
