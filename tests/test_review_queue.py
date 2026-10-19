@@ -44,3 +44,12 @@ def test_main_prints_table_and_default_day(tmp_path, capsys):
     assert RQ.main(["--log", str(log)]) == 0
     out = capsys.readouterr().out
     assert "# 2日目の解き直し（最初の15分）：1問" in out and "| R6秋 | 1 | 09-3 | データベース | 1日前の誤答 |" in out
+
+
+def test_all_days_lists_every_unmastered_wrong():
+    rows = [r(2, 1), r(5, 2, ok=True, conf="C"), r(7, 3, ok=True, conf="A"),
+            r(9, 4), r(10, 4, ok=True, conf="A", kind="復習", first="N"), r(12, 4, ok=True, conf="A", kind="復習", first="N")]
+    q = RQ.build_queue(rows, day=16, all_days=True)
+    assert keys(q) == [("R6秋", "1"), ("R6秋", "2")]   # 4は習得済み、3は正解
+    assert q[0]["理由"] == "2日目"
+    assert RQ.build_queue(rows, day=16) == []           # 通常は1日前・3日前だけ

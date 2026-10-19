@@ -107,7 +107,9 @@ python scripts/analyze_A.py --day 2 --out reports/A_day02.md # 日次レポー�
 その他：
 
 ```bash
-python scripts/quiz.py --day 1 --source 令和7年度秋期 --exam     # 通し（途中で正誤を見せない）
+python scripts/quiz.py --day 1 --source 令和7年度秋期 --exam --sheet  # 通し：原本PDFで解き、解答だけ「イA」と入力
+python scripts/quiz.py --day 1 --resume                        # 中断した通しの答え合わせを続ける
+python scripts/quiz.py --day 16 --review --all                 # これまでの誤答と確信度Cをすべて解き直す
 python scripts/quiz.py --day 7 --weak 3                        # 誤答数上位3中分類
 python scripts/pass_prob.py                                    # 合格確率（ログの初見の通しから）
 python scripts/pass_prob.py --mean 52                          # 平均を指定して計算

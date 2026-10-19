@@ -4,7 +4,9 @@
 除外：最後の誤答より後の解き直し（種別＝復習）で、2回続けて確信度Aの正解だった問題と、その日すでに解き直した問題。
 解き直しの結果は、種別＝復習・初見＝N で記録する（add_log.py、または quiz.py --review）。
 
-使い方: python scripts/review_queue.py [--day N]   # 既定はログの最後の日目＋1
+--all：日数を問わず、これまでの誤答と確信度Cのうち習得済みでないものをすべて出す（16日目の総復習用）。
+
+使い方: python scripts/review_queue.py [--day N] [--all]   # 既定はログの最後の日目＋1
 """
 from __future__ import annotations
 
@@ -26,15 +28,19 @@ def mastered(history: list[dict]) -> bool:
     return len(last) == MASTERED and all(r["正誤"] == "正" and r["確信度"] == "A" for r in last)
 
 
-def build_queue(rows: list[dict], day: int) -> list[dict]:
+def build_queue(rows: list[dict], day: int, all_days: bool = False) -> list[dict]:
     """解き直す問題の一覧。ログの並び順を時間の順とみなす。"""
     history: dict[tuple, list[dict]] = {}
     for r in rows:
         history.setdefault(aplib.question_key(r), []).append(r)
     queue = []
     for key, hist in history.items():
-        reasons = [f"{d}日前" for d in INTERVALS
-                   if any(int(r["日目"]) == day - d and aplib.is_effective_wrong(r) for r in hist)]
+        if all_days:
+            wrong_days = sorted({int(r["日目"]) for r in hist if aplib.is_effective_wrong(r) and int(r["日目"]) < day})
+            reasons = [f"{d}日目" for d in wrong_days]
+        else:
+            reasons = [f"{d}日前" for d in INTERVALS
+                       if any(int(r["日目"]) == day - d and aplib.is_effective_wrong(r) for r in hist)]
         if not reasons or mastered(hist):
             continue
         if any(int(r["日目"]) == day and r["種別"] == "復習" for r in hist):
@@ -48,18 +54,19 @@ def build_queue(rows: list[dict], day: int) -> list[dict]:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--day", type=int, help="今日の日目（既定：ログの最後の日目＋1）")
+    p.add_argument("--all", action="store_true", help="これまでの誤答と確信度Cをすべて出す（総復習）")
     p.add_argument("--log", type=Path, default=aplib.LOG_A_PATH)
     args = p.parse_args(argv)
     taxonomy = aplib.load_taxonomy()
     rows, warnings = aplib.read_log_a(args.log, taxonomy)
     day = args.day or min(max((int(r["日目"]) for r in rows), default=0) + 1, aplib.PLAN_DAYS)
-    queue = build_queue(rows, day)
-    print(f"# {day}日目の解き直し（最初の15分）：{len(queue)}問")
+    queue = build_queue(rows, day, args.all)
+    print(f"# {day}日目の解き直し（{'総復習' if args.all else '最初の15分'}）：{len(queue)}問")
     print("| 出典 | 問番号 | コード | 中分類 | 対象の理由 | 前回 |")
     print("| --- | --- | --- | --- | --- | --- |")
     for q in queue:
         print(f"| {q['出典']} | {q['問番号']} | {q['コード']} | {taxonomy[q['コード']]['中分類']} | {q['理由']}の誤答 | {q['前回']} |")
-    if len(queue) > 8:
+    if len(queue) > 8 and not args.all:
         print(f"\n注意：{len(queue)}問は15分（1問約1.9分で約8問）に収まりません。コードの順に解き、残りは翌日に回してください。")
     for w in warnings:
         print(f"警告: {w}", file=sys.stderr)

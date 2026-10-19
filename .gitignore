@@ -3,3 +3,4 @@ __pycache__/
 reports/
 data/ap_bank.sqlite
 data/*.tmp
+data/*.pending.json

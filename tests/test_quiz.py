@@ -163,3 +163,54 @@ def test_drill_pool_excludes_reserved_exams(tmp_path):
 
 def test_reserved_file_lists_six_newest_exams():
     assert quiz.load_reserved() == ["令和7年度秋期", "令和7年度春期", "令和6年度秋期", "令和6年度春期", "令和5年度秋期", "令和5年度春期"]
+
+
+def test_parse_sheet():
+    assert quiz.parse_sheet("イA") == ("イ", "A") and quiz.parse_sheet("2 b") == ("イ", "B") and quiz.parse_sheet("uc") == ("ウ", "C")
+    for bad in ("イ", "A", "オA", ""):
+        try:
+            quiz.parse_sheet(bad)
+            assert False, bad
+        except ValueError:
+            pass
+
+
+def test_sheet_mode_hides_stem_and_measures_each_entry(tmp_path):
+    # Enterで計時開始 → 2問を「解答＋確信度」で入力 → 答え合わせ（M1誤答の解析、M2はEnter）
+    rows, out = run(tmp_path, ["", "アB", "イA", "4", "根拠", "理由", ""], [POOL[0], POOL[5]],
+                    kind="通し", quota=80, sheet=True)
+    assert [(r["問番号"], r["正誤"], r["確信度"], r["種別"]) for r in rows] == [("M1", "誤", "B", "通し"), ("M2", "正", "A", "通し")]
+    assert not any(line == "M1" for line in out)          # 問題文（stem＝id）は表示しない
+    assert all(int(r["解答秒"]) > 0 for r in rows)
+    assert any("正答数 1/2" in line for line in out)
+    assert not quiz.pending_path(tmp_path / "log_A.csv").exists()
+
+
+def test_interrupted_grading_is_saved_and_resumed(tmp_path):
+    import shutil
+    qdir = tmp_path / "questions"
+    qdir.mkdir()
+    shutil.copy(aplib.DATA_DIR / "questions" / "self_made.jsonl", qdir / "self_made.jsonl")
+    log = tmp_path / "log.csv"
+    common = ["--log", str(log), "--db", str(tmp_path / "b.sqlite"), "--dir", str(qdir)]
+    qs = [json.loads(ln) for ln in open(qdir / "self_made.jsonl", encoding="utf-8")]
+    wrong = {"ア": "イ", "イ": "ウ", "ウ": "エ", "エ": "ア"}
+    mid_qs = sorted([x for x in qs if x["code"].startswith("09-")], key=lambda x: x["id"])[:2]
+    feed = iter([wrong[mid_qs[0]["answer"]] + "B", wrong[mid_qs[1]["answer"]] + "B", "q"])
+    out = []
+    # 通しを2問だけ解き（--count 2）、1問目の答え合わせで中断
+    assert quiz.main(["--day", "1", "--mid", "9", "--exam", "--sheet", "--count", "2", "--use-reserved"] + common,
+                     input_fn=lambda p: "" if "計時" in p else next(feed), output_fn=out.append, clock=FakeClock()) == 0
+    pend = quiz.pending_path(log)
+    assert pend.exists() and not log.exists()
+    # 保留があると新しい演習は始めない
+    assert quiz.main(["--day", "2", "--mid", "9"] + common, output_fn=out.append) == 1
+    assert any("--resume" in line for line in out)
+    feed = iter(["1", "根拠", "理由", "2", "根拠", "理由"])
+    assert quiz.main(["--day", "2", "--resume"] + common, input_fn=lambda _p: next(feed), output_fn=out.append,
+                     clock=FakeClock()) == 0
+    rows, warnings = aplib.read_log_a(log, aplib.load_taxonomy())
+    assert not warnings and [(r["問番号"], r["日目"], r["種別"], r["原因"]) for r in rows] == [
+        (mid_qs[0]["id"], "1", "通し", "知識不足"), (mid_qs[1]["id"], "1", "通し", "混同")]
+    assert not pend.exists()
+    assert quiz.main(["--day", "2", "--resume"] + common, output_fn=out.append) == 1
