@@ -199,6 +199,21 @@ def select_mains(pool, log_rows, taxonomy, *, mids=None, source=None, weak=0, in
     return sorted(qs, key=lambda q: (q["mid_no"], q["id"])) if not source else qs
 
 
+RESERVED_PATH = aplib.DATA_DIR / "reserved_exams.txt"
+
+
+def load_reserved(path: Path = RESERVED_PATH) -> list[str]:
+    """通し演習のために取っておく回（出典に含まれる文字列）の一覧。"""
+    if not path.exists():
+        return []
+    return [ln.strip() for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")]
+
+
+def drill_pool(pool, reserved: list[str]):
+    """分野別・弱点演習で使う問題（取っておく回を除く）。初見の通しを関連問題で崩さないため。"""
+    return [q for q in pool if not any(r in q["source"] for r in reserved)]
+
+
 def default_quota(plan: dict[str, int], today: str) -> int:
     return plan.get(today, 40)
 
@@ -211,6 +226,7 @@ def main(argv=None, input_fn=input, output_fn=print, clock=time.monotonic, today
     p.add_argument("--exam", action="store_true", help="通し演習：途中で正誤を見せない")
     p.add_argument("--count", type=int, help="問題数の上限（本問＋関連）。既定は plan_A.csv の当日計画、なければ40")
     p.add_argument("--include-seen", action="store_true", help="解いたことのある問題も本問に含める")
+    p.add_argument("--use-reserved", action="store_true", help="通し用に取っておく回（data/reserved_exams.txt）も分野別で使う")
     p.add_argument("--log", type=Path, default=aplib.LOG_A_PATH)
     p.add_argument("--db", type=Path, default=qbank.DB_PATH)
     p.add_argument("--dir", type=Path, default=qbank.QUESTIONS_DIR)
@@ -223,6 +239,11 @@ def main(argv=None, input_fn=input, output_fn=print, clock=time.monotonic, today
         output_fn(f"警告: {w}")
     day = today or date.today()
     mids = [f"{int(m):02d}" for m in args.mid.split(",")] if args.mid else None
+    if not args.source and not args.use_reserved:
+        reserved = load_reserved()
+        pool = drill_pool(pool, reserved)
+        if reserved:
+            output_fn(f"通し用に取っておく回（{len(reserved)}回）は使いません：{'、'.join(reserved)}")
     mains = select_mains(pool, log_rows, taxonomy, mids=mids, source=args.source,
                          weak=args.weak, include_seen=args.include_seen)
     if not mains:

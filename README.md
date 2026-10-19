@@ -86,6 +86,7 @@ python mermaid_scheduler.py sample.mmd --json
 | `scripts/quiz.py` | 演習：誤答・不明 → 解説と解析 → 関連問題を2〜3問 → 次の本問 |
 | `docs/sources.md` | 問題の出典と利用条件 |
 | `data/syllabus_A.json` / `data/scope_B.json` / `docs/ap_knowledge_tree.html` | シラバス Ver.7.2・試験要綱 Ver.5.6 から抽出した公式の知識ツリー（ユーザー提示） |
+| `data/reserved_exams.txt` | 通し演習（初見）のために取っておく回。分野別・弱点演習と関連問題には使わない |
 | `scripts/import_ipa.py` | IPA の AP 午前 PDF（問題冊子・解答例）を OCR して問題バンクに取り込む |
 | `scripts/syllabus.py` | シラバスとの照合（`check`）・学習ノート生成（`book`）・ツリー表示（`tree`） |
 | `docs/ap_syllabus_book.md` | シラバスの並びで、425項目すべての用語例と要点をまとめた学習ノート |

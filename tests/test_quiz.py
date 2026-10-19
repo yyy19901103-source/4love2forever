@@ -120,3 +120,16 @@ def test_main_end_to_end_with_seed_bank(tmp_path):
     rows, warnings = aplib.read_log_a(log, aplib.load_taxonomy())
     assert not warnings and rows[0]["問題ID"] == "SELF-09-2-001"
     assert any("上限 40問" in line for line in out)  # 10/19 の計画は40問
+
+
+def test_drill_pool_excludes_reserved_exams(tmp_path):
+    pool = [dict(q("A", "09-3"), source="令和7年度秋期 AP 午前 問1"), dict(q("B", "09-3"), source="令和4年度春期 AP 午前 問1"), q("C", "09-3")]
+    assert [x["id"] for x in quiz.drill_pool(pool, ["令和7年度秋期"])] == ["B", "C"]
+    f = tmp_path / "r.txt"
+    f.write_text("# コメント\n令和7年度秋期\n\n", encoding="utf-8")
+    assert quiz.load_reserved(f) == ["令和7年度秋期"]
+    assert quiz.load_reserved(tmp_path / "none.txt") == []
+
+
+def test_reserved_file_lists_six_newest_exams():
+    assert quiz.load_reserved() == ["令和7年度秋期", "令和7年度春期", "令和6年度秋期", "令和6年度春期", "令和5年度秋期", "令和5年度春期"]
