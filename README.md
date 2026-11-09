@@ -66,3 +66,54 @@ python mermaid_scheduler.py sample.mmd --json
 - リソース（担当者、工数）最適化
 - Web UI（Streamlit / FastAPI + フロント）
 - Mermaid live preview 連携
+
+---
+
+# 応用情報技術者試験（AP）学習ログ
+
+方針・日程・ルールは `CLAUDE.md` を参照。日付ではなく「日目」で管理する（科目A 1〜17日目、科目B B1〜B26）。
+
+| ファイル | 役割 |
+| --- | --- |
+| `data/taxonomy.csv` | 科目A体系表（23中分類・96小分類、コード例 `09-3`） |
+| `data/plan_A.csv` | 科目Aの17日計画（日目・問題数・種別・内容、合計900問） |
+| `scripts/add_log.py` | 1問ずつ対話形式で `data/log_A.csv` に追記（入力時に検証。分析は誤答と確信度B/Cだけ） |
+| `scripts/quiz.py` | 演習：問題バンクから出題し、日目・種別・初見を付けて自動記録 |
+| `scripts/review_queue.py` | その日の最初の15分で解き直す問題（前日・3日前の誤答と確信度C） |
+| `scripts/pass_prob.py` | 初見の通し直近2回の平均から合格確率（推定）を出す |
+| `scripts/analyze_A.py` | 科目A日次レポート（中分類別Wilson 95%区間・上位3中分類・優先度と2〜6日目の組み替え案・判定ゲート・原因別・計画差） |
+| `scripts/analyze_B.py` | 科目B分野別レポートと選択分野の入れ替え判定（6割未満） |
+| `docs/error_log.md` | 誤りの記録 |
+| `docs/taxonomy_tree.md` / `scripts/tree_A.py` | 科目Aの知識体系ツリー |
+| `data/questions/*.jsonl` / `scripts/qbank.py` | 問題バンクの正本と SQLite の作成・検証・収録状況 |
+| `docs/sources.md` | 問題の出典と利用条件 |
+| `data/syllabus_A.json` / `data/scope_B.json` / `docs/ap_knowledge_tree.html` | シラバス Ver.7.2・試験要綱 Ver.5.6 から抽出した公式の知識ツリー（ユーザー提示） |
+| `data/reserved_exams.txt` | 通し演習（初見）のために取っておく回。分野別・弱点演習と関連問題には使わない |
+| `scripts/import_ipa.py` | IPA の AP 午前 PDF（問題冊子・解答例）を OCR して問題バンクに取り込む |
+| `scripts/syllabus.py` | シラバスとの照合（`check`）・学習ノート生成（`book`）・ツリー表示（`tree`） |
+| `docs/ap_syllabus_book.md` | シラバスの並びで、425項目すべての用語例と要点をまとめた学習ノート |
+| `data/knowledge_items.csv` / `data/syllabus_points.csv` | 要点の正本（学習項目433件＋シラバス項目に直接付けた198件） |
+
+1日の流れ（例：2日目）：
+
+```bash
+python scripts/review_queue.py --day 2                       # 最初の15分で解き直す一覧
+python scripts/quiz.py --day 2 --review                      # 問題バンクにある分を解き直す（種別＝復習）
+python scripts/quiz.py --day 2 --mid 11 --count 40           # 分野別（記録は自動）
+python scripts/add_log.py                                    # 過去問道場など他で解いた1問を手入力
+python scripts/analyze_A.py --day 2 --out reports/A_day02.md # 日次レポート
+```
+
+その他：
+
+```bash
+python scripts/quiz.py --day 1 --source 令和7年度秋期 --exam --sheet  # 通し：原本PDFで解き、解答だけ「イA」と入力
+python scripts/quiz.py --day 1 --resume                        # 中断した通しの答え合わせを続ける
+python scripts/quiz.py --day 16 --review --all                 # これまでの誤答と確信度Cをすべて解き直す
+python scripts/quiz.py --day 7 --weak 3                        # 誤答数上位3中分類
+python scripts/pass_prob.py                                    # 合格確率（ログの初見の通しから）
+python scripts/pass_prob.py --mean 52                          # 平均を指定して計算
+python scripts/qbank.py stats                                  # 問題バンクの収録状況
+python scripts/analyze_B.py --from B1 --to B7                  # 科目Bの選択確定（B1〜B7）
+python -m pytest -q                                            # テスト
+```
