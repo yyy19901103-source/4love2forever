@@ -66,3 +66,8 @@ python mermaid_scheduler.py sample.mmd --json
 - リソース（担当者、工数）最適化
 - Web UI（Streamlit / FastAPI + フロント）
 - Mermaid live preview 連携
+
+## quality-kit（TypeScript 版の品質統計ツール）
+
+`quality-kit/` に、TypeScript の特徴を示す品質統計ツール（Cp/Cpk・EWMA・CUSUM・Hampel）があります。
+使い方は [quality-kit/README.md](quality-kit/README.md) を参照してください。
